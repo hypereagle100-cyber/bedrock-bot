@@ -1,8 +1,6 @@
 const express = require('express');
 const bedrock = require('bedrock-protocol');
-const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
-const path = require('path');
 
 process.on('uncaughtException', (err) => {
   console.error('⚠️ Uncaught Exception:', err.message);
@@ -17,33 +15,33 @@ const PORT = process.env.PORT || 8080;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Automatically generate accounts hyper.eagle50 through hyper.eagle58 (total of 9 accounts)
+// 5 Bedrock Accounts (Bot 1 to Bot 5)
 const botsConfig = [];
-for (let i = 50; i <= 58; i++) {
+for (let i = 1; i <= 5; i++) {
   botsConfig.push({
-    id: i - 49, // Bot 1 to 9
-    username: `hyper.eagle${i}@outlook.com`,
-    folder: `./profiles/bot${i - 49}`
+    id: i,
+    username: `hyper.eagle${49 + i}@outlook.com`,
+    folder: `./profiles/bot${i}`
   });
 }
 
-// Ensure profile directories exist for token caching
+// Ensure profile directories exist for Microsoft token caching
 botsConfig.forEach(cfg => {
   if (!fs.existsSync(cfg.folder)) {
     fs.mkdirSync(cfg.folder, { recursive: true });
   }
 });
 
-const activeBots = {};          // Stores active client instances
-const botSpawned = {};          // Tracks if the bot actually reached the 'spawn' event
-const botEnabled = {};          // Tracks if a bot is authorized to run (true/false)
-const botLoginData = {};        // Stores active Microsoft MSA verification URIs and user codes per bot
+const activeBots = {};          // Stores active bedrock-protocol client instances
+const botSpawned = {};          // Tracks if the bot reached the world/spawn state
+const botEnabled = {};          // Tracks if a bot is authorized to run
+const botLoginData = {};        // Stores active Microsoft MSA verification URIs and user codes
 
-let currentHost = 'mintsmp.net';
-let currentPort = 25125;
+let currentHost = 'og-donutsmp.net';
+let currentPort = 19132;
 
 // ==========================================
-// HTML DASHBOARD INTERFACE (Figma-Style Animated Mesh Gradient)
+// WEB DASHBOARD INTERFACE
 // ==========================================
 app.get('/', (req, res) => {
   res.send(`
@@ -51,7 +49,7 @@ app.get('/', (req, res) => {
     <html lang="en">
     <head>
       <meta charset="UTF-8">
-      <title>MintSMP 1 Trillion Dollar Command Center</title>
+      <title>OG-DonutSMP Bot Command Center</title>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
 
@@ -66,7 +64,6 @@ app.get('/', (req, res) => {
           background-color: #080c14;
         }
 
-        /* Live Animated Figma-Style Mesh Gradient Background */
         .mesh-bg {
           position: fixed;
           top: 0;
@@ -141,7 +138,7 @@ app.get('/', (req, res) => {
           backdrop-filter: blur(16px);
           padding: 14px 24px;
           border-radius: 14px;
-          width: 420px;
+          width: 440px;
           margin: 0 auto 20px auto;
           display: flex;
           justify-content: space-around;
@@ -157,7 +154,7 @@ app.get('/', (req, res) => {
           border-radius: 8px;
           font-weight: 600;
           outline: none;
-          width: 130px;
+          width: 145px;
           text-align: center;
         }
 
@@ -171,6 +168,15 @@ app.get('/', (req, res) => {
           gap: 20px;
           max-width: 1150px;
           margin: 0 auto;
+        }
+
+        @media (max-width: 900px) {
+          .grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+          .grid { grid-template-columns: 1fr; }
+          .config-bar { width: 92%; flex-direction: column; gap: 10px; }
         }
 
         .card {
@@ -316,12 +322,12 @@ app.get('/', (req, res) => {
         <div class="blob blob-3"></div>
       </div>
 
-      <h1>⚡ MintSMP Multi-Bot Dashboard</h1>
-      <p class="subtitle">Managing 9 Enterprise Accounts (hyper.eagle50 - hyper.eagle58)</p>
+      <h1>⚡ OG-DonutSMP Bot Dashboard</h1>
+      <p class="subtitle">Managing 5 Bedrock Accounts on og-donutsmp.net:19132</p>
 
       <div class="config-bar">
-        <div>Server IP: <input type="text" id="serverIp" value="mintsmp.net"></div>
-        <div>Port: <input type="text" id="serverPort" value="25125"></div>
+        <div>Server IP: <input type="text" id="serverIp" value="og-donutsmp.net"></div>
+        <div>Port: <input type="text" id="serverPort" value="19132"></div>
       </div>
 
       <div class="global-btns">
@@ -333,55 +339,69 @@ app.get('/', (req, res) => {
 
       <script>
         const bots = ${JSON.stringify(botsConfig)};
-        
+
+        function renderCards() {
+          const grid = document.getElementById('botGrid');
+          grid.innerHTML = '';
+
+          bots.forEach(bot => {
+            grid.innerHTML += \`
+              <div class="card" id="card-\${bot.id}">
+                <div>
+                  <h3>Bot \${bot.id}</h3>
+                  <p>\${bot.username} <br>Status: <span id="status-\${bot.id}" class="status-offline">Offline</span></p>
+                  <div id="login-\${bot.id}"></div>
+                </div>
+                <div class="btn-row">
+                  <button class="btn-connect" onclick="botAction(\${bot.id}, 'connect')">Connect</button>
+                  <button class="btn-disconnect" onclick="botAction(\${bot.id}, 'disconnect')">Disconnect</button>
+                </div>
+              </div>
+            \`;
+          });
+        }
+
         async function fetchStatus() {
           try {
             const res = await fetch('/status');
             const data = await res.json();
-            
-            const grid = document.getElementById('botGrid');
-            grid.innerHTML = '';
-            
+
             bots.forEach(bot => {
               const info = data[bot.id] || { status: 'Offline', verification_uri: null, user_code: null };
-              
-              let statusClass = 'status-offline';
-              if (info.status === 'Online') statusClass = 'status-online';
-              else if (info.status === 'Awaiting Login') statusClass = 'status-awaiting';
-              else if (info.status === 'Connecting...') statusClass = 'status-connecting';
+              const statusEl = document.getElementById('status-' + bot.id);
+              const loginEl = document.getElementById('login-' + bot.id);
 
-              let loginHtml = '';
-              if (info.user_code && info.verification_uri) {
-                loginHtml = \`
-                  <div class="login-box">
-                    🔑 <b>Login Required:</b>
-                    <div class="login-row">
-                      🔗 <a href="\${info.verification_uri}" target="_blank">Open Microsoft Link</a>
-                      <button class="btn-copy" onclick="copyText('\${info.verification_uri}', this)">Copy Link</button>
-                    </div>
-                    <div class="login-row">
-                      <span>Code: <span class="login-code">\${info.user_code}</span></span>
-                      <button class="btn-copy" onclick="copyText('\${info.user_code}', this)">Copy Code</button>
-                    </div>
-                  </div>
-                \`;
+              if (statusEl) {
+                let statusClass = 'status-offline';
+                if (info.status === 'Online') statusClass = 'status-online';
+                else if (info.status === 'Awaiting Login') statusClass = 'status-awaiting';
+                else if (info.status === 'Connecting...') statusClass = 'status-connecting';
+
+                statusEl.innerText = info.status;
+                statusEl.className = statusClass;
               }
 
-              grid.innerHTML += \`
-                <div class="card">
-                  <div>
-                    <h3>Bot \${bot.id}</h3>
-                    <p>\${bot.username} <br>Status: <span class="\${statusClass}">\${info.status}</span></p>
-                    \${loginHtml}
-                  </div>
-                  <div class="btn-row">
-                    <button class="btn-connect" onclick="botAction(\${bot.id}, 'connect')">Connect</button>
-                    <button class="btn-disconnect" onclick="botAction(\${bot.id}, 'disconnect')">Disconnect</button>
-                  </div>
-                </div>
-              \`;
+              if (loginEl) {
+                if (info.user_code && info.verification_uri) {
+                  loginEl.innerHTML = \`
+                    <div class="login-box">
+                      🔑 <b>Login Required:</b>
+                      <div class="login-row">
+                        🔗 <a href="\${info.verification_uri}" target="_blank">Open Microsoft Link</a>
+                        <button class="btn-copy" onclick="copyText('\${info.verification_uri}', this)">Copy Link</button>
+                      </div>
+                      <div class="login-row">
+                        <span>Code: <span class="login-code">\${info.user_code}</span></span>
+                        <button class="btn-copy" onclick="copyText('\${info.user_code}', this)">Copy Code</button>
+                      </div>
+                    </div>
+                  \`;
+                } else {
+                  loginEl.innerHTML = '';
+                }
+              }
             });
-          } catch(e) {}
+          } catch (e) {}
         }
 
         function copyText(text, btn) {
@@ -444,6 +464,7 @@ app.get('/', (req, res) => {
           fetchStatus();
         }
 
+        renderCards();
         fetchStatus();
         setInterval(fetchStatus, 3000);
       </script>
@@ -490,12 +511,12 @@ function startBot(botInfo, host, port) {
   cleanupBot(id);
 
   currentHost = host || currentHost;
-  currentPort = parseInt(port) || currentPort;
+  currentPort = parseInt(port, 10) || currentPort;
 
   botEnabled[id] = true;
   botSpawned[id] = false;
   botLoginData[id] = null;
-  console.log(`🚀 Connecting Bot ${id} (${botInfo.username})...`);
+  console.log(`🚀 Connecting Bot ${id} (${botInfo.username}) to ${currentHost}:${currentPort}...`);
 
   try {
     const client = bedrock.createClient({
@@ -544,14 +565,13 @@ function startBot(botInfo, host, port) {
       console.log(`🔌 Bot ${id} disconnected.`);
       cleanupBot(id);
     });
-
   } catch (e) {
     console.error(`❌ Failed to start Bot ${id}:`, e.message);
     cleanupBot(id);
   }
 }
 
-// Background Sequential Loop: Checks bots 1 to 9 in order with a 6-second delay between each
+// Sequential auto-reconnect loop across Bots 1 to 5
 async function runAutoConnectLoop() {
   while (true) {
     for (let i = 0; i < botsConfig.length; i++) {
@@ -571,14 +591,14 @@ async function runAutoConnectLoop() {
 }
 
 app.post('/bot/:id/:action', (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(req.params.id, 10);
   const action = req.params.action;
   const { host, port } = req.body;
-  const botInfo = botsConfig.find(b => b.id === id); // <-- Fixed syntax error here
+  const botInfo = botsConfig.find(b => b.id === id);
 
   if (!botInfo) return res.status(404).json({ error: 'Bot not found' });
   currentHost = host || currentHost;
-  currentPort = parseInt(port) || currentPort;
+  currentPort = parseInt(port, 10) || currentPort;
 
   if (action === 'connect') {
     botEnabled[id] = true;
@@ -597,20 +617,20 @@ app.post('/bots/:action', (req, res) => {
   const { host, port } = req.body;
 
   currentHost = host || currentHost;
-  currentPort = parseInt(port) || currentPort;
+  currentPort = parseInt(port, 10) || currentPort;
 
   if (action === 'connect') {
     botsConfig.forEach(botInfo => {
       botEnabled[botInfo.id] = true;
     });
-    console.log(`🚀 Connect All triggered. Sequential loop handling connections.`);
+    console.log('🚀 Connect All triggered. Sequential loop handling connections.');
   } else if (action === 'disconnect') {
     botsConfig.forEach(botInfo => {
       const id = botInfo.id;
       botEnabled[id] = false;
       cleanupBot(id);
     });
-    console.log(`🛑 Disconnect All triggered. All bots disabled.`);
+    console.log('🛑 Disconnect All triggered. All bots disabled.');
   }
 
   res.json({ success: true });
@@ -620,111 +640,3 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Dashboard running on port ${PORT}`);
   runAutoConnectLoop();
 });
-
-// ==========================================
-// DISCORD MASTER CONTROLLER
-// ==========================================
-const discordClient = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
-});
-
-discordClient.on('ready', () => {
-  console.log(`🤖 Discord Controller logged in as ${discordClient.user.tag}`);
-});
-
-discordClient.on('messageCreate', (message) => {
-  if (message.author.bot || !message.content.startsWith('!cmd')) return;
-
-  const args = message.content.split(' ');
-  if (args.length < 3) {
-    return message.reply('❌ Invalid format. Use: `!cmd <1-9> <command>` or `!cmd all <command>`');
-  }
-
-  const targetId = args[1].toLowerCase();
-  let contentText = args.slice(2).join(' ').trim();
-
-  // Helper to send clean chat text from the bot without name prefixing issues
-  const sendCleanChat = (botClient, text) => {
-    botClient.queue('text', {
-      type: 'chat',
-      needs_translation: false,
-      source_name: text,
-      xuid: '',
-      platform_chat_id: '',
-      filtered_message: text,
-      message: text
-    });
-  };
-
-  // If command is welcome, pass it cleanly through the chat text stream
-  if (contentText.toLowerCase() === 'welcome') {
-    if (targetId === 'all') {
-      let count = 0;
-      for (const [id, botClient] of Object.entries(activeBots)) {
-        if (botSpawned[id]) {
-          sendCleanChat(botClient, 'welcome');
-          count++;
-        }
-      }
-      return message.reply(`✅ Broadcasted "welcome" cleanly to ${count} active bots.`);
-    }
-
-    const botId = parseInt(targetId);
-    const targetBot = activeBots[botId];
-    if (targetBot && botSpawned[botId]) {
-      sendCleanChat(targetBot, 'welcome');
-      return message.reply(`✅ Bot ${botId} sent "welcome".`);
-    } else {
-      return message.reply(`❌ Bot ${botId} is not online.`);
-    }
-  }
-
-  // Standard command execution for /home, /shard pay, etc.
-  const lowerContent = contentText.toLowerCase();
-  if (lowerContent.startsWith('home ') || lowerContent === 'home') {
-    contentText = contentText.startsWith('/') ? contentText : `/${contentText}`;
-  } else if (!contentText.startsWith('/')) {
-    contentText = `/${contentText}`;
-  }
-
-  function sendCommandToGame(botClient, text) {
-    botClient.queue('command_request', {
-      command: text,
-      origin: {
-        type: 'player',
-        uuid: '',
-        request_id: '',
-        player_entity_id: botClient.entityId || 0
-      },
-      internal: false,
-      version: 'latest'
-    });
-  }
-
-  if (targetId === 'all') {
-    let count = 0;
-    for (const [id, botClient] of Object.entries(activeBots)) {
-      if (botSpawned[id]) {
-        sendCommandToGame(botClient, contentText);
-        count++;
-      }
-    }
-    return message.reply(`✅ Broadcasted command \`${contentText}\` to ${count} active bots.`);
-  }
-
-  const botId = parseInt(targetId);
-  const targetBot = activeBots[botId];
-
-  if (targetBot && botSpawned[botId]) {
-    sendCommandToGame(targetBot, contentText);
-    message.reply(`✅ Executed command \`${contentText}\` on Bot ${botId}.`);
-  } else {
-    message.reply(`❌ Bot ${botId} is either offline or hasn't fully spawned into the world yet.`);
-  }
-});
-
-discordClient.login(process.env.DISCORD_TOKEN);
